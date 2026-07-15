@@ -83,27 +83,81 @@ function addSkill(title, desc) {
 }
 
 /* ============================================================
-   Diff component — a visual change preview (no JSON)
+   Unsaved-changes state (badge per section + floating save bar)
    ============================================================ */
-function renderDiff(diff) {
-  const rows = diff.rows.map(r => {
-    const mark = r.type === "added" ? "+" : r.type === "removed" ? "−" : "";
-    return `<div class="diff-row ${r.type}"><span class="diff-mark">${mark}</span><span class="diff-text">${r.text}</span></div>`;
-  }).join("");
-  return `
-    <div class="diff-card" data-diff="${diff.id}">
-      <div class="diff-head">${ICONS.diff}<span>${diff.field}</span></div>
-      <div class="diff-body">${rows}</div>
-      <div class="diff-actions">
-        <button class="diff-btn diff-apply" data-apply="${diff.id}">Apply change</button>
-        <button class="diff-btn diff-dismiss" data-dismiss="${diff.id}">Dismiss</button>
-      </div>
-    </div>`;
+const SECTION_LABELS = {
+  personality: "Personality",
+  knowledge:   "Knowledge sources",
+  skills:      "Skills",
+  scenarios:   "Scenarios",
+};
+const unsaved = new Set();
+
+function syncUnsaved() {
+  Object.keys(SECTION_LABELS).forEach(k => {
+    const h = document.getElementById("sec-" + k);
+    if (!h) return;
+    const badge = h.querySelector(".badge-unsaved");
+    if (unsaved.has(k) && !badge) {
+      h.insertAdjacentHTML("beforeend",
+        `<span class="badge badge-unsaved"><span class="dot"></span>Unsaved changes</span>`);
+    } else if (!unsaved.has(k) && badge) {
+      badge.remove();
+    }
+  });
+  const bar = document.getElementById("save-bar");
+  if (unsaved.size) {
+    document.getElementById("save-bar-sections").textContent =
+      [...unsaved].map(k => SECTION_LABELS[k]).join(", ");
+    bar.hidden = false;
+  } else {
+    bar.hidden = true;
+  }
+}
+function markUnsaved(sections) { (sections || []).forEach(s => unsaved.add(s)); syncUnsaved(); }
+
+function showToast(text) {
+  const t = document.createElement("div");
+  t.className = "save-toast";
+  t.innerHTML = `${ICONS.check}${text}`;
+  document.body.appendChild(t);
+  setTimeout(() => t.classList.add("out"), 1800);
+  setTimeout(() => t.remove(), 2200);
 }
 
-// registry so Apply/Dismiss can find the applier for a rendered diff
-const diffRegistry = {};
-let diffSeq = 0;
+document.getElementById("save-apply").addEventListener("click", () => {
+  unsaved.clear(); syncUnsaved();
+  showToast("Changes saved — Tessa is up to date");
+});
+document.getElementById("save-discard").addEventListener("click", () => {
+  unsaved.clear(); syncUnsaved();
+  showToast("Changes discarded");
+});
+
+// manual edits in the form also flag their section as unsaved
+document.querySelectorAll("[data-section]").forEach(sec => {
+  sec.addEventListener("input", () => markUnsaved([sec.dataset.section]));
+});
+
+/* ============================================================
+   Applied-changes component (visual diff, no JSON)
+   ============================================================ */
+function renderApplied(changes) {
+  const rows = changes.map(c => `
+    <div class="applied-row">
+      ${ICONS.check}
+      <span class="applied-field">${c.field}</span>
+      <span class="applied-arrow">→</span>
+      <span class="applied-value">${c.value}</span>
+    </div>`).join("");
+  const n = changes.length;
+  return `
+    <div class="applied-card">
+      <div class="applied-head">${ICONS.edit}<span>Applied to the agent</span><span class="applied-count">${n} change${n > 1 ? "s" : ""}</span></div>
+      <div class="applied-body">${rows}</div>
+    </div>
+    <div class="applied-note">Nothing is live yet — remember to <b>Save changes</b>, otherwise they won't reach callers. Discard anytime to undo.</div>`;
+}
 
 /* ============================================================
    Mocked LLM
@@ -121,80 +175,62 @@ const CONVOS = {
 
 let mode = "new";
 
-/* keyword-driven mock responder → returns { text, diff?, suggests? } */
+/* keyword-driven mock responder → returns { text, apply?, changes?, sections?, suggests? } */
 function respond(text) {
   const t = text.toLowerCase();
 
-  // change language → visible diff on the Language + Voice components
+  // change language → change lands on the Language + Voice components
   if (/(polish|polski)/.test(t) || (/language|lang/.test(t) && /add|change|set|switch/.test(t))) {
-    const id = "lang-" + (++diffSeq);
-    diffRegistry[id] = () => {
-      addChip("field-language", "🇵🇱", "Polish (Poland)");
-      addChip("field-voice", "🇵🇱", "Polish (Poland)");
-      flash(document.getElementById("field-language"));
-    };
     return {
-      text: `Got it — I'll add <b>Polish (Poland)</b> to Tessa's languages and give her a matching Polish voice. Here's the change:`,
-      diff: {
-        id, field: "Personality › Language & Voice",
-        rows: [
-          { type: "context", text: "🇬🇧 English (British)" },
-          { type: "context", text: "🇪🇸 Spanish (Spain)" },
-          { type: "added",   text: "🇵🇱 Polish (Poland)" },
-        ],
+      text: `Done — I've added <b>Polish (Poland)</b> to Tessa's languages and gave her a matching Polish voice. You can see it in the form:`,
+      apply: () => {
+        addChip("field-language", "🇵🇱", "Polish (Poland)");
+        addChip("field-voice", "🇵🇱", "Polish (Poland)");
+        flash(document.getElementById("field-language"));
       },
+      changes: [
+        { field: "Language", value: "+ Polish (Poland)" },
+        { field: "Voice",    value: "+ Polish (Poland)" },
+      ],
+      sections: ["personality"],
       suggests: ["Also set Polish as default", "Improve the greeting", "Run a configuration audit"],
     };
   }
 
-  // greeting rewrite → diff on Greeting
+  // greeting rewrite
   if (/greeting|welcome|hello message|intro/.test(t)) {
-    const id = "greet-" + (++diffSeq);
     const next = "Hi, thanks for calling [Company Name]! I'm Tessa — how can I help you today?";
-    diffRegistry[id] = () => {
-      const inp = document.getElementById("input-greeting");
-      if (inp) inp.value = next;
-      flash(inp && inp.closest(".input"));
-    };
     return {
-      text: `Here's a warmer, more natural greeting that still keeps your company name:`,
-      diff: {
-        id, field: "Personality › Greeting",
-        rows: [
-          { type: "removed", text: "Thanks for calling [Company Name] - how can I help today?" },
-          { type: "added",   text: next },
-        ],
+      text: `Done — here's a warmer, more natural greeting that still keeps your company name:`,
+      apply: () => {
+        const inp = document.getElementById("input-greeting");
+        if (inp) inp.value = next;
+        flash(inp && inp.closest(".input"));
       },
+      changes: [{ field: "Greeting", value: "warmer, introduces Tessa" }],
+      sections: ["personality"],
       suggests: ["Add Polish as a language", "Add a booking skill"],
     };
   }
 
-  // booking skill → diff that adds a Skill
+  // booking skill
   if (/booking|calendar|appointment|schedul/.test(t)) {
-    const id = "book-" + (++diffSeq);
-    diffRegistry[id] = () => addSkill("Book an appointment", "Shares your scheduling link and books via SMS");
     return {
-      text: `I'll add a <b>Booking</b> skill so Tessa can share your scheduling link and book appointments over SMS:`,
-      diff: {
-        id, field: "Skills",
-        rows: [
-          { type: "added", text: "Book an appointment — shares scheduling link, books via SMS" },
-        ],
-      },
+      text: `Done — I've added a <b>Booking</b> skill so Tessa can share your scheduling link and book appointments over SMS:`,
+      apply: () => addSkill("Book an appointment", "Shares your scheduling link and books via SMS"),
+      changes: [{ field: "Skills", value: "+ Book an appointment" }],
+      sections: ["skills"],
       suggests: ["Add Transfer to Human", "Run a configuration audit"],
     };
   }
 
-  // transfer to human → diff that adds a Skill
+  // transfer to human
   if (/transfer|human|agent|escalat|front desk/.test(t)) {
-    const id = "xfer-" + (++diffSeq);
-    diffRegistry[id] = () => addSkill("Transfer to Human", "Routes urgent callers to the front desk");
     return {
-      text: `Good call — right now urgent callers can't reach a person. I'll add a <b>Transfer to Human</b> skill:`,
-      diff: {
-        id, field: "Skills",
-        rows: [{ type: "added", text: "Transfer to Human — routes urgent callers to the front desk" }],
-      },
+      text: `Good call — right now urgent callers can't reach a person. I've added a <b>Transfer to Human</b> skill:`,
+      apply: () => addSkill("Transfer to Human", "Routes urgent callers to the front desk"),
+      changes: [{ field: "Skills", value: "+ Transfer to Human" }],
+      sections: ["skills"],
       suggests: ["Add an after-hours scenario", "Run a configuration audit"],
     };
   }
@@ -249,12 +285,12 @@ const sendBtn = document.getElementById("composer-send");
 
 function scrollMsgs() { msgs.scrollTop = msgs.scrollHeight; }
 
-function appendMessage(role, html, diff) {
+function appendMessage(role, html, changes) {
   const el = document.createElement("div");
   el.className = "msg " + role;
   const avatar = role === "assistant" ? `<div class="msg-avatar">${ICONS.sparkle}</div>` : "";
-  const diffHtml = diff ? renderDiff(diff) : "";
-  el.innerHTML = `${avatar}<div class="msg-col"><div class="bubble">${html}</div>${diffHtml}</div>`;
+  const appliedHtml = changes && changes.length ? renderApplied(changes) : "";
+  el.innerHTML = `${avatar}<div class="msg-col"><div class="bubble">${html}</div>${appliedHtml}</div>`;
   msgs.appendChild(el);
   scrollMsgs();
 }
@@ -273,7 +309,9 @@ function botReply(userText) {
   setTimeout(() => {
     thinking.remove();
     const r = respond(userText);
-    appendMessage("assistant", r.text, r.diff);
+    if (r.apply) r.apply();                    // change lands in the form right away
+    appendMessage("assistant", r.text, r.changes);
+    if (r.sections) markUnsaved(r.sections);   // badge + save bar
     if (r.suggests) renderSuggests(r.suggests);
   }, 480);
 }
@@ -296,28 +334,13 @@ suggestsEl.addEventListener("click", (e) => {
   if (b) send(b.textContent);
 });
 
-// diff apply / dismiss (delegated)
-msgs.addEventListener("click", (e) => {
-  const applyBtn = e.target.closest("[data-apply]");
-  const dismissBtn = e.target.closest("[data-dismiss]");
-  if (applyBtn) {
-    const id = applyBtn.dataset.apply;
-    if (diffRegistry[id]) diffRegistry[id]();
-    const card = applyBtn.closest(".diff-card");
-    card.querySelector(".diff-actions").outerHTML =
-      `<div class="diff-applied">${ICONS.check}Applied — updated in the form</div>`;
-  }
-  if (dismissBtn) {
-    const card = dismissBtn.closest(".diff-card");
-    card.querySelector(".diff-actions").outerHTML =
-      `<div class="diff-applied" style="color:var(--gray-cool-400)">Dismissed</div>`;
-  }
-});
-
 /* ---------- demo mode toggle (prototype only) ---------- */
 function loadMode(m) {
   mode = m;
   document.querySelectorAll(".demo-seg").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
+  // live-agent banner only makes sense for an agent that's already live
+  document.getElementById("live-banner").hidden = m !== "regular";
+  unsaved.clear(); syncUnsaved();
   msgs.innerHTML = "";
   appendMessage("assistant", CONVOS[m].intro);
   renderSuggests(CONVOS[m].suggests);
