@@ -13,7 +13,12 @@ const ICONS = {
   kebab:   `<svg viewBox="0 0 24 24" class="ico"><circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/></svg>`,
   edit:    `<svg viewBox="0 0 24 24" class="ico"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>`,
   diff:    `<svg viewBox="0 0 24 24" class="ico"><path d="M12 3v6M9 6h6"/><path d="M9 18h6"/><circle cx="12" cy="18" r="0"/></svg>`,
+  plusCircle:  `<svg viewBox="0 0 24 24" class="ico"><circle cx="12" cy="12" r="9"/><path d="M12 8.5v7M8.5 12h7"/></svg>`,
+  refreshCw:   `<svg viewBox="0 0 24 24" class="ico"><path d="M21 8a9 9 0 0 0-15.5-2.4L3 8"/><path d="M3 3v5h5"/><path d="M3 16a9 9 0 0 0 15.5 2.4L21 16"/><path d="M21 21v-5h-5"/></svg>`,
+  trash:       `<svg viewBox="0 0 24 24" class="ico"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>`,
 };
+
+const USER_AVATAR = "https://i.pravatar.cc/64?img=47";
 
 /* ---------- knowledge sources ---------- */
 const files = [
@@ -155,20 +160,28 @@ document.querySelectorAll("[data-section]").forEach(sec => {
 /* ============================================================
    Applied-changes component (visual diff, no JSON)
    ============================================================ */
-/* each change: { field, action: 'added' | 'removed' | 'changed', value?, from?, to? } */
-function renderApplied(changes) {
+/* each change: { field, action: 'added' | 'removed' | 'changed', value?, from?, to? }
+   Icon encodes the action (Figma 17502-29636): ⊕ added · ⟳ changed · 🗑 removed */
+const undoRegistry = {};
+let undoSeq = 0;
+
+function renderApplied(changes, undoId) {
   const rows = changes.map(c => {
-    let valueHtml;
+    let icon, valueHtml;
     if (c.action === "removed") {
-      valueHtml = `<span class="applied-sign minus">−</span><span class="applied-value remove">${c.value}</span>`;
+      icon = `<span class="applied-ico removed">${ICONS.trash}</span>`;
+      valueHtml = `<span class="applied-value remove">${c.value}</span>`;
     } else if (c.action === "changed") {
-      valueHtml = `<span class="applied-value">${c.to}</span><span class="applied-was">was “${c.from}”</span>`;
+      icon = `<span class="applied-ico changed">${ICONS.refreshCw}</span>`;
+      valueHtml = `<span class="applied-value">${c.to}</span>` +
+        (c.from ? `<span class="applied-was">was “${c.from}”</span>` : "");
     } else {
-      valueHtml = `<span class="applied-sign plus">+</span><span class="applied-value">${c.value}</span>`;
+      icon = `<span class="applied-ico added">${ICONS.plusCircle}</span>`;
+      valueHtml = `<span class="applied-value">${c.value}</span>`;
     }
     return `
     <div class="applied-row">
-      ${ICONS.check}
+      ${icon}
       <span class="applied-field">${c.field}</span>
       <span class="applied-arrow">→</span>
       ${valueHtml}
@@ -177,10 +190,13 @@ function renderApplied(changes) {
   const n = changes.length;
   return `
     <div class="applied-card">
-      <div class="applied-head">${ICONS.edit}<span>Applied to the agent</span><span class="applied-count">${n} change${n > 1 ? "s" : ""}</span></div>
+      <div class="applied-head"><span>Applied to the agent</span><span class="applied-count">${n} change${n > 1 ? "s" : ""}</span></div>
       <div class="applied-body">${rows}</div>
     </div>
-    <div class="applied-note">Nothing is live yet — remember to <b>Save changes</b>, otherwise they won't reach callers. Discard anytime to undo.</div>`;
+    <div class="applied-footer">
+      <span class="applied-note">To accept the change click on <b>“Save changes”</b> — nothing reaches callers until you do.</span>
+      ${undoId ? `<button class="undo-btn" data-undo="${undoId}">Undo</button>` : ""}
+    </div>`;
 }
 
 /* ============================================================
@@ -199,9 +215,45 @@ const CONVOS = {
 
 let mode = "new";
 
-/* keyword-driven mock responder → returns { text, apply?, changes?, sections?, suggests? } */
+const LANG_FLAGS = { "Spanish (Spain)": "🇪🇸", "English (British)": "🇬🇧", "Polish (Poland)": "🇵🇱" };
+
+/* keyword-driven mock responder → returns { text, apply?, revert?, changes?, sections?, suggests? } */
 function respond(text) {
   const t = text.toLowerCase();
+
+  // pasted setup prompt / big ask → multi-change combo (Figma flow: 4 changes at once)
+  if (text.length > 140 || /set ?up|inbound agent|receptionist for|configure (her|the agent)/.test(t)) {
+    const greetNext = "Hi, thanks for calling [Company Name]! I'm Tessa — how can I help you today?";
+    const greetInp = document.getElementById("input-greeting");
+    const greetPrev = greetInp ? greetInp.value : "";
+    return {
+      text: `Here's a warmer, more natural setup that still keeps your company name — I've tuned the languages, voice, and greeting in one go:`,
+      apply: () => {
+        addChip("field-language", "🇵🇱", "Polish (Poland)");
+        addChip("field-voice", "🇵🇱", "Polish (Poland)");
+        if (greetInp) greetInp.value = greetNext;
+        removeChip("field-language", "Spanish (Spain)");
+        removeChip("field-voice", "Spanish (Spain)");
+        flash(document.getElementById("field-language"));
+      },
+      revert: () => {
+        removeChip("field-language", "Polish (Poland)");
+        removeChip("field-voice", "Polish (Poland)");
+        if (greetInp) greetInp.value = greetPrev;
+        addChip("field-language", "🇪🇸", "Spanish (Spain)");
+        addChip("field-voice", "🇪🇸", "Spanish (Spain)");
+        flash(document.getElementById("field-language"));
+      },
+      changes: [
+        { field: "Language", action: "added",   value: "Polish (Poland)" },
+        { field: "Greeting", action: "changed", to: "“Hi, thanks for calling…”" },
+        { field: "Voice",    action: "changed", to: "Amelia, warm female" },
+        { field: "Language", action: "removed", value: "Spanish (Spain)" },
+      ],
+      sections: ["personality"],
+      suggests: ["Add a booking skill", "Add a Knowledge Base file"],
+    };
+  }
 
   // REMOVE a language (checked before add so "remove Spanish" doesn't fall through)
   if (/remove|delete|drop/.test(t) && /spanish|english|polish/.test(t)) {
@@ -211,6 +263,11 @@ function respond(text) {
       apply: () => {
         removeChip("field-language", lang);
         removeChip("field-voice", lang);
+        flash(document.getElementById("field-language"));
+      },
+      revert: () => {
+        addChip("field-language", LANG_FLAGS[lang], lang);
+        addChip("field-voice", LANG_FLAGS[lang], lang);
         flash(document.getElementById("field-language"));
       },
       changes: [
@@ -225,12 +282,14 @@ function respond(text) {
   // REMOVE a skill
   if (/remove|delete|drop/.test(t) && /skill|message|extract|data/.test(t)) {
     const skill = /extract|data/.test(t) ? "Extract Data" : "Take a message";
+    const desc = skill === "Extract Data" ? "Pull data from the conversation" : "Allows the caller to leave a message";
     return {
       text: `Done — I've removed the <b>${skill}</b> skill. Tessa will no longer use it on calls:`,
       apply: () => {
         removeSkillRow(skill);
         flash(document.getElementById("skills-list"));
       },
+      revert: () => addSkill(skill, desc),
       changes: [{ field: "Skills", action: "removed", value: skill }],
       sections: ["skills"],
       suggests: ["Add a booking skill", "Run a configuration audit"],
@@ -249,6 +308,10 @@ function respond(text) {
         if (inp) inp.value = next;
         flash(inp && inp.closest(".input"));
       },
+      revert: () => {
+        if (inp) inp.value = prev;
+        flash(inp && inp.closest(".input"));
+      },
       changes: [{ field: "Name", action: "changed", from: prev, to: next }],
       sections: ["personality"],
       suggests: ["Update the greeting to match", "Run a configuration audit"],
@@ -262,6 +325,11 @@ function respond(text) {
       apply: () => {
         addChip("field-language", "🇵🇱", "Polish (Poland)");
         addChip("field-voice", "🇵🇱", "Polish (Poland)");
+        flash(document.getElementById("field-language"));
+      },
+      revert: () => {
+        removeChip("field-language", "Polish (Poland)");
+        removeChip("field-voice", "Polish (Poland)");
         flash(document.getElementById("field-language"));
       },
       changes: [
@@ -284,6 +352,10 @@ function respond(text) {
         if (inp) inp.value = next;
         flash(inp && inp.closest(".input"));
       },
+      revert: () => {
+        if (inp) inp.value = prev;
+        flash(inp && inp.closest(".input"));
+      },
       changes: [{ field: "Greeting", action: "changed", from: prev, to: next }],
       sections: ["personality"],
       suggests: ["Add Polish as a language", "Add a booking skill"],
@@ -295,6 +367,7 @@ function respond(text) {
     return {
       text: `Done — I've added a <b>Booking</b> skill so Tessa can share your scheduling link and book appointments over SMS:`,
       apply: () => addSkill("Book an appointment", "Shares your scheduling link and books via SMS"),
+      revert: () => removeSkillRow("Book an appointment"),
       changes: [{ field: "Skills", action: "added", value: "Book an appointment" }],
       sections: ["skills"],
       suggests: ["Add Transfer to Human", "Remove Take a message", "Run a configuration audit"],
@@ -306,6 +379,7 @@ function respond(text) {
     return {
       text: `Good call — right now urgent callers can't reach a person. I've added a <b>Transfer to Human</b> skill:`,
       apply: () => addSkill("Transfer to Human", "Routes urgent callers to the front desk"),
+      revert: () => removeSkillRow("Transfer to Human"),
       changes: [{ field: "Skills", action: "added", value: "Transfer to Human" }],
       sections: ["skills"],
       suggests: ["Add an after-hours scenario", "Run a configuration audit"],
@@ -362,36 +436,54 @@ const sendBtn = document.getElementById("composer-send");
 
 function scrollMsgs() { msgs.scrollTop = msgs.scrollHeight; }
 
-function appendMessage(role, html, changes) {
+function appendMessage(role, html, changes, undoId) {
   const el = document.createElement("div");
   el.className = "msg " + role;
-  const avatar = role === "assistant" ? `<div class="msg-avatar">${ICONS.sparkle}</div>` : "";
-  const appliedHtml = changes && changes.length ? renderApplied(changes) : "";
+  const avatar = role === "assistant"
+    ? `<div class="msg-avatar">${ICONS.sparkle}</div>`
+    : `<img class="msg-user-avatar" alt="" src="${USER_AVATAR}" />`;
+  const appliedHtml = changes && changes.length ? renderApplied(changes, undoId) : "";
   el.innerHTML = `${avatar}<div class="msg-col"><div class="bubble">${html}</div>${appliedHtml}</div>`;
   msgs.appendChild(el);
   scrollMsgs();
 }
 
 function renderSuggests(list) {
-  suggestsEl.innerHTML = (list || []).map(s => `<button class="suggest">${s}</button>`).join("");
+  suggestsEl.innerHTML = (list || [])
+    .map((s, i) => `<button class="suggest" style="animation-delay:${i * 70}ms">${s}</button>`)
+    .join("");
 }
 
 function botReply(userText) {
-  // small "thinking" delay to feel like an LLM
+  // animated "Thinking..." state while the mock LLM works
   const thinking = document.createElement("div");
   thinking.className = "msg assistant";
-  thinking.innerHTML = `<div class="msg-avatar">${ICONS.sparkle}</div><div class="msg-col"><div class="bubble">…</div></div>`;
+  thinking.innerHTML = `<div class="msg-avatar">${ICONS.sparkle}</div>
+    <div class="msg-col"><div class="thinking">Thinking<span class="td">.</span><span class="td">.</span><span class="td">.</span></div></div>`;
   msgs.appendChild(thinking);
   scrollMsgs();
+  const delay = 900 + Math.random() * 600;
   setTimeout(() => {
     thinking.remove();
     const r = respond(userText);
     if (r.apply) r.apply();                    // change lands in the form right away
-    appendMessage("assistant", r.text, r.changes);
+    let undoId = null;
+    if (r.revert) { undoId = "u" + (++undoSeq); undoRegistry[undoId] = r.revert; }
+    appendMessage("assistant", r.text, r.changes, undoId);
     if (r.sections) markUnsaved(r.sections);   // badge + save bar
-    if (r.suggests) renderSuggests(r.suggests);
-  }, 480);
+    if (r.suggests) renderSuggests(r.suggests); // always re-offer nudges — no dead ends
+  }, delay);
 }
+
+// Undo (delegated): reverts the change in the form, marks the card as undone
+msgs.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-undo]");
+  if (!btn) return;
+  const id = btn.dataset.undo;
+  if (undoRegistry[id]) { undoRegistry[id](); delete undoRegistry[id]; }
+  btn.outerHTML = `<span class="undo-done">${ICONS.check}Undone</span>`;
+  showToast("Change undone");
+});
 
 function send(text) {
   const val = (text != null ? text : input.value).trim();
@@ -425,6 +517,29 @@ function loadMode(m) {
 document.querySelectorAll(".demo-seg").forEach(b => {
   b.addEventListener("click", () => loadMode(b.dataset.mode));
 });
+
+/* ---------- animated input placeholder (typewriter nudges) ---------- */
+const PLACEHOLDERS = [
+  "Ask the composer to change anything",
+  "Try “add Polish as a language”",
+  "Try “make the greeting warmer”",
+  "Try “remove the Extract Data skill”",
+  "Try “rename Tessa to Emma”",
+  "Try “run a configuration audit”",
+];
+let phIndex = 0, phTick = 0;
+const PH_HOLD = 28; // ticks to hold the full text before moving on
+setInterval(() => {
+  if (input.value) return;                    // never animate over the user's text
+  const cur = PLACEHOLDERS[phIndex];
+  phTick++;
+  if (phTick >= cur.length + PH_HOLD) {
+    phIndex = (phIndex + 1) % PLACEHOLDERS.length;
+    phTick = 0;
+  }
+  const shown = cur.slice(0, Math.min(phTick, cur.length));
+  input.placeholder = shown + (phTick < cur.length ? "▏" : "");
+}, 45);
 
 // boot
 loadMode("new");
