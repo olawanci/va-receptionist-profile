@@ -81,6 +81,19 @@ function addSkill(title, desc) {
   list.appendChild(row);
   flash(row);
 }
+function removeChip(containerId, label) {
+  const c = document.getElementById(containerId);
+  if (!c) return;
+  const chip = [...c.querySelectorAll(".chip")].find(ch => ch.textContent.includes(label));
+  if (chip) chip.remove();
+}
+function removeSkillRow(title) {
+  const list = document.getElementById("skills-list");
+  if (!list) return;
+  const row = [...list.querySelectorAll(".skill")]
+    .find(s => (s.querySelector(".skill-title")?.textContent || "").trim().startsWith(title));
+  if (row) row.remove();
+}
 
 /* ============================================================
    Unsaved-changes state (badge per section + floating save bar)
@@ -142,14 +155,25 @@ document.querySelectorAll("[data-section]").forEach(sec => {
 /* ============================================================
    Applied-changes component (visual diff, no JSON)
    ============================================================ */
+/* each change: { field, action: 'added' | 'removed' | 'changed', value?, from?, to? } */
 function renderApplied(changes) {
-  const rows = changes.map(c => `
+  const rows = changes.map(c => {
+    let valueHtml;
+    if (c.action === "removed") {
+      valueHtml = `<span class="applied-sign minus">−</span><span class="applied-value remove">${c.value}</span>`;
+    } else if (c.action === "changed") {
+      valueHtml = `<span class="applied-value">${c.to}</span><span class="applied-was">was “${c.from}”</span>`;
+    } else {
+      valueHtml = `<span class="applied-sign plus">+</span><span class="applied-value">${c.value}</span>`;
+    }
+    return `
     <div class="applied-row">
       ${ICONS.check}
       <span class="applied-field">${c.field}</span>
       <span class="applied-arrow">→</span>
-      <span class="applied-value">${c.value}</span>
-    </div>`).join("");
+      ${valueHtml}
+    </div>`;
+  }).join("");
   const n = changes.length;
   return `
     <div class="applied-card">
@@ -168,8 +192,8 @@ const CONVOS = {
     suggests: ["Where do I start?", "Write a warmer greeting", "Add Polish as a language", "Add a booking skill"],
   },
   regular: {
-    intro: `Welcome back 👋 Tessa's been live and handling calls. I can run a quick <b>configuration audit</b>, tidy your scenarios, or make any change you describe.<br><br>What would you like to do?`,
-    suggests: ["Run a configuration audit", "Change language to Polish", "Improve the greeting", "Review scenarios"],
+    intro: `Welcome back 👋 Tessa's been live and handling calls. I can run a quick <b>configuration audit</b>, tidy your scenarios, or make any change you describe — add, remove, or change anything in the form.<br><br>What would you like to do?`,
+    suggests: ["Run a configuration audit", "Add Polish as a language", "Remove Spanish", "Rename Tessa to Emma"],
   },
 };
 
@@ -179,7 +203,59 @@ let mode = "new";
 function respond(text) {
   const t = text.toLowerCase();
 
-  // change language → change lands on the Language + Voice components
+  // REMOVE a language (checked before add so "remove Spanish" doesn't fall through)
+  if (/remove|delete|drop/.test(t) && /spanish|english|polish/.test(t)) {
+    const lang = /spanish/.test(t) ? "Spanish (Spain)" : /english/.test(t) ? "English (British)" : "Polish (Poland)";
+    return {
+      text: `Done — I've removed <b>${lang}</b> from Tessa's languages and voices. Callers can no longer be answered in it:`,
+      apply: () => {
+        removeChip("field-language", lang);
+        removeChip("field-voice", lang);
+        flash(document.getElementById("field-language"));
+      },
+      changes: [
+        { field: "Language", action: "removed", value: lang },
+        { field: "Voice",    action: "removed", value: lang },
+      ],
+      sections: ["personality"],
+      suggests: ["Add Polish as a language", "Rename Tessa to Emma", "Run a configuration audit"],
+    };
+  }
+
+  // REMOVE a skill
+  if (/remove|delete|drop/.test(t) && /skill|message|extract|data/.test(t)) {
+    const skill = /extract|data/.test(t) ? "Extract Data" : "Take a message";
+    return {
+      text: `Done — I've removed the <b>${skill}</b> skill. Tessa will no longer use it on calls:`,
+      apply: () => {
+        removeSkillRow(skill);
+        flash(document.getElementById("skills-list"));
+      },
+      changes: [{ field: "Skills", action: "removed", value: skill }],
+      sections: ["skills"],
+      suggests: ["Add a booking skill", "Run a configuration audit"],
+    };
+  }
+
+  // CHANGE the agent's name
+  if (/rename|change (the )?name|call (her|him|it)/.test(t)) {
+    const m = t.match(/(?:to|as) ([a-z]+)\b/);
+    const next = m ? m[1][0].toUpperCase() + m[1].slice(1) : "Emma";
+    const inp = document.getElementById("input-name");
+    const prev = inp ? inp.value : "Tessa";
+    return {
+      text: `Done — I've renamed the agent to <b>${next}</b>. She'll introduce herself with the new name on every call:`,
+      apply: () => {
+        if (inp) inp.value = next;
+        flash(inp && inp.closest(".input"));
+      },
+      changes: [{ field: "Name", action: "changed", from: prev, to: next }],
+      sections: ["personality"],
+      suggests: ["Update the greeting to match", "Run a configuration audit"],
+    };
+  }
+
+  // ADD a language → change lands on the Language + Voice components
   if (/(polish|polski)/.test(t) || (/language|lang/.test(t) && /add|change|set|switch/.test(t))) {
     return {
       text: `Done — I've added <b>Polish (Poland)</b> to Tessa's languages and gave her a matching Polish voice. You can see it in the form:`,
@@ -189,47 +265,48 @@ function respond(text) {
         flash(document.getElementById("field-language"));
       },
       changes: [
-        { field: "Language", value: "+ Polish (Poland)" },
-        { field: "Voice",    value: "+ Polish (Poland)" },
+        { field: "Language", action: "added", value: "Polish (Poland)" },
+        { field: "Voice",    action: "added", value: "Polish (Poland)" },
       ],
       sections: ["personality"],
-      suggests: ["Also set Polish as default", "Improve the greeting", "Run a configuration audit"],
+      suggests: ["Remove Spanish", "Improve the greeting", "Run a configuration audit"],
     };
   }
 
-  // greeting rewrite
+  // CHANGE the greeting
   if (/greeting|welcome|hello message|intro/.test(t)) {
     const next = "Hi, thanks for calling [Company Name]! I'm Tessa — how can I help you today?";
+    const inp = document.getElementById("input-greeting");
+    const prev = inp ? inp.value : "";
     return {
       text: `Done — here's a warmer, more natural greeting that still keeps your company name:`,
       apply: () => {
-        const inp = document.getElementById("input-greeting");
         if (inp) inp.value = next;
         flash(inp && inp.closest(".input"));
       },
-      changes: [{ field: "Greeting", value: "warmer, introduces Tessa" }],
+      changes: [{ field: "Greeting", action: "changed", from: prev, to: next }],
       sections: ["personality"],
       suggests: ["Add Polish as a language", "Add a booking skill"],
     };
   }
 
-  // booking skill
+  // ADD a booking skill
   if (/booking|calendar|appointment|schedul/.test(t)) {
     return {
       text: `Done — I've added a <b>Booking</b> skill so Tessa can share your scheduling link and book appointments over SMS:`,
       apply: () => addSkill("Book an appointment", "Shares your scheduling link and books via SMS"),
-      changes: [{ field: "Skills", value: "+ Book an appointment" }],
+      changes: [{ field: "Skills", action: "added", value: "Book an appointment" }],
       sections: ["skills"],
-      suggests: ["Add Transfer to Human", "Run a configuration audit"],
+      suggests: ["Add Transfer to Human", "Remove Take a message", "Run a configuration audit"],
     };
   }
 
-  // transfer to human
+  // ADD transfer to human
   if (/transfer|human|agent|escalat|front desk/.test(t)) {
     return {
       text: `Good call — right now urgent callers can't reach a person. I've added a <b>Transfer to Human</b> skill:`,
       apply: () => addSkill("Transfer to Human", "Routes urgent callers to the front desk"),
-      changes: [{ field: "Skills", value: "+ Transfer to Human" }],
+      changes: [{ field: "Skills", action: "added", value: "Transfer to Human" }],
       sections: ["skills"],
       suggests: ["Add an after-hours scenario", "Run a configuration audit"],
     };
@@ -270,7 +347,7 @@ function respond(text) {
 
   // generic fallback (mock "adjusting")
   return {
-    text: `Sure — I've noted that. Tell me a bit more and I'll make the change directly in the form. For example, try <i>“change the language to Polish”</i>, <i>“make the greeting friendlier”</i>, or <i>“add a booking skill”</i>.`,
+    text: `Sure — I've noted that. Tell me a bit more and I'll make the change directly in the form. For example, try <i>“add Polish as a language”</i>, <i>“remove Spanish”</i>, or <i>“rename Tessa to Emma”</i>.`,
     suggests: mode === "new" ? CONVOS.new.suggests : CONVOS.regular.suggests,
   };
 }
