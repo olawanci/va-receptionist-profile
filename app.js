@@ -193,44 +193,59 @@ document.querySelectorAll("[data-section]").forEach(sec => {
 /* ============================================================
    Applied-changes component (visual diff, no JSON)
    ============================================================ */
-/* each change: { field, action: 'added' | 'removed' | 'changed', value?, from?, to? }
-   Icon encodes the action (Figma 17502-29636): ⊕ added · ⟳ changed · 🗑 removed */
+/* Universal change contract — one shape for every field type:
+     { field, action: 'added'|'removed'|'changed', before?, after?, value?, from?, to? }
+   `before`/`after` are the delta the component renders. Legacy value/from/to are
+   normalized so existing responders keep working:
+     added   → before: (before ?? none)      after: (after ?? value)
+     removed → before: (before ?? value)      after: (after ?? removed)
+     changed → before: (before ?? from)       after: (after ?? to)
+   Icon encodes the action: ⊕ added · ⟳ changed · 🗑 removed */
 const undoRegistry = {};
 let undoSeq = 0;
 
-function renderApplied(changes, undoId) {
-  const rows = changes.map(c => {
-    if (c.status === "failed") {
-      // partial success — this row couldn't be applied
-      return `
-      <div class="applied-row failed">
-        <span class="applied-ico failed">${ICONS.alert}</span>
-        <span class="applied-field">${c.field}</span>
-        <span class="applied-arrow">→</span>
-        <span class="applied-value fail">Couldn't apply</span>
-        <span class="applied-was">${c.reason}</span>
-      </div>`;
-    }
-    let icon, valueHtml;
-    if (c.action === "removed") {
-      icon = `<span class="applied-ico removed">${ICONS.trash}</span>`;
-      valueHtml = `<span class="applied-value remove">${c.value}</span>`;
-    } else if (c.action === "changed") {
-      icon = `<span class="applied-ico changed">${ICONS.refreshCw}</span>`;
-      valueHtml = `<span class="applied-value">${c.to}</span>` +
-        (c.from ? `<span class="applied-was">was “${c.from}”</span>` : "");
-    } else {
-      icon = `<span class="applied-ico added">${ICONS.plusCircle}</span>`;
-      valueHtml = `<span class="applied-value">${c.value}</span>`;
-    }
+const ACTION_ICON = {
+  added:   `<span class="applied-ico added">${ICONS.plusCircle}</span>`,
+  changed: `<span class="applied-ico changed">${ICONS.refreshCw}</span>`,
+  removed: `<span class="applied-ico removed">${ICONS.trash}</span>`,
+};
+
+function normalizeDelta(c) {
+  if (c.action === "removed") return { before: c.before ?? c.value ?? null, after: c.after ?? null };
+  if (c.action === "changed") return { before: c.before ?? c.from ?? null, after: c.after ?? c.to ?? null };
+  return { before: c.before ?? null, after: c.after ?? c.value ?? null };            // added
+}
+
+/* the universal delta row: field + Before → After, works for text, chips, skills… */
+function renderDeltaRow(c) {
+  if (c.status === "failed") {
     return `
-    <div class="applied-row">
-      ${icon}
-      <span class="applied-field">${c.field}</span>
-      <span class="applied-arrow">→</span>
-      ${valueHtml}
+      <div class="delta-row failed">
+        <div class="delta-head"><span class="applied-ico failed">${ICONS.alert}</span><span class="delta-field">${c.field}</span></div>
+        <div class="delta-body">
+          <div class="delta-line"><span class="delta-label">Failed</span><span class="delta-val fail">${c.reason}</span></div>
+        </div>
+      </div>`;
+  }
+  const { before, after } = normalizeDelta(c);
+  const beforeVal = before != null && before !== ""
+    ? `<span class="delta-val">${before}</span>`
+    : `<span class="delta-val empty">${c.action === "added" ? "Not set" : "—"}</span>`;
+  const afterVal = after != null && after !== ""
+    ? `<span class="delta-val">${after}</span>`
+    : `<span class="delta-val empty">${c.action === "removed" ? "Removed" : "—"}</span>`;
+  return `
+    <div class="delta-row ${c.action}">
+      <div class="delta-head">${ACTION_ICON[c.action] || ACTION_ICON.changed}<span class="delta-field">${c.field}</span></div>
+      <div class="delta-body">
+        <div class="delta-line before"><span class="delta-label">Before</span>${beforeVal}</div>
+        <div class="delta-line after"><span class="delta-label">After</span>${afterVal}</div>
+      </div>
     </div>`;
-  }).join("");
+}
+
+function renderApplied(changes, undoId) {
+  const rows = changes.map(renderDeltaRow).join("");
   const n = changes.length;
   const failed = changes.filter(c => c.status === "failed");
   const ok = n - failed.length;
@@ -351,10 +366,10 @@ function respond(text) {
         flash(document.getElementById("field-language"));
       },
       changes: [
-        { field: "Language", action: "added",   value: "Polish (Poland)" },
-        { field: "Greeting", action: "changed", to: "“Hi, thanks for calling…”" },
+        { field: "Language", action: "added",   before: "English, Spanish", after: "English, Polish" },
+        { field: "Greeting", action: "changed", before: greetPrev || "Thanks for calling [Company Name]…", after: "Hi, thanks for calling [Company Name]! I'm Tessa…" },
         { field: "Voice",    status: "failed",  reason: "the Amelia voice isn't on your plan" },
-        { field: "Language", action: "removed", value: "Spanish (Spain)" },
+        { field: "Language", action: "removed", before: "Spanish (Spain)", after: "English, Polish" },
       ],
       sections: ["personality"],
       suggests: ["See voices on other plans", "Add a booking skill", "Add a Knowledge Base file"],
@@ -493,6 +508,8 @@ function respond(text) {
       };
     }
     const atCapAfter = langCount() + 1 >= LANG_CAP;
+    const beforeList = currentLangs();
+    const afterList = beforeList ? `${beforeList}, ${label}` : label;
     return {
       text: `Done — I've added <b>${label}</b> to Tessa's languages and gave her a matching voice.${atCapAfter ? ` That's the max <b>${LANG_CAP}</b> on your plan.` : ""}`,
       apply: () => {
@@ -506,8 +523,8 @@ function respond(text) {
         flash(document.getElementById("field-language"));
       },
       changes: [
-        { field: "Language", action: "added", value: label },
-        { field: "Voice",    action: "added", value: label },
+        { field: "Language", action: "added", before: beforeList, after: afterList },
+        { field: "Voice",    action: "added", before: beforeList, after: afterList },
       ],
       sections: ["personality"],
       suggests: atCapAfter
@@ -551,7 +568,7 @@ function respond(text) {
       text: `Done — I've added a <b>Booking</b> skill so Tessa can share your scheduling link and book appointments over SMS:`,
       apply: () => addSkill("Book an appointment", "Shares your scheduling link and books via SMS"),
       revert: () => removeSkillRow("Book an appointment"),
-      changes: [{ field: "Skills", action: "added", value: "Book an appointment" }],
+      changes: [{ field: "Skills", action: "added", before: "No booking skill", after: "Book an appointment · SMS" }],
       sections: ["skills"],
       suggests: ["Add Transfer to Human", "Remove Take a message", "Run a configuration audit"],
     };
@@ -560,10 +577,10 @@ function respond(text) {
   // ADD transfer to human
   if (/transfer|human|agent|escalat|front desk/.test(t)) {
     return {
-      text: `Good call — right now urgent callers can't reach a person. I've added a <b>Transfer to Human</b> skill:`,
-      apply: () => addSkill("Transfer to Human", "Routes urgent callers to the front desk"),
+      text: `A skill has been created with your specified conditions. Please review it to confirm accuracy:`,
+      apply: () => addSkill("Transfer to Human", "Routes urgent callers to the Support Team"),
       revert: () => removeSkillRow("Transfer to Human"),
-      changes: [{ field: "Skills", action: "added", value: "Transfer to Human" }],
+      changes: [{ field: "Skills", action: "added", before: "No transfer skill", after: "Transfer to Human · Support Team" }],
       sections: ["skills"],
       suggests: ["Add an after-hours scenario", "Run a configuration audit"],
     };
