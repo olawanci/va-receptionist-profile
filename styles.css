@@ -369,16 +369,31 @@ body{
 .applied-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--gray-cool-100);font-size:13px;font-weight:700;color:var(--text-primary)}
 .applied-count{margin-left:auto;background:var(--success-100);color:var(--success-600);font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
 .applied-body{padding:4px 0}
-.applied-row{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:13px}
 .applied-ico .ico{width:15px;height:15px;display:block}
 .applied-ico.added .ico{color:var(--success-600)}
 .applied-ico.changed .ico{color:var(--brand-400)}
 .applied-ico.removed .ico{color:var(--error-600)}
-.applied-field{color:var(--gray-cool-500);font-weight:500}
-.applied-arrow{color:var(--gray-cool-400)}
-.applied-value{color:var(--text-primary);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.applied-value.remove{color:var(--error-600)}
-.applied-was{color:var(--gray-cool-400);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;flex:0 1 auto}
+
+/* universal before → after delta row */
+.delta-row{padding:10px 14px;border-top:1px solid var(--gray-cool-100)}
+.delta-row:first-child{border-top:none}
+.delta-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.delta-field{font-size:13px;font-weight:600;color:var(--text-primary)}
+.delta-body{display:flex;flex-direction:column;gap:4px;padding-left:23px;position:relative}
+.delta-body::before{content:"";position:absolute;left:7px;top:9px;bottom:9px;width:1px;background:var(--gray-cool-200)}
+.delta-line{display:flex;gap:10px;font-size:13px;line-height:1.45}
+.delta-label{flex:0 0 40px;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--gray-cool-400);padding-top:2px}
+.delta-val{color:var(--text-primary);min-width:0;overflow-wrap:anywhere}
+.delta-line.before .delta-val{color:var(--gray-cool-500)}
+.delta-row.changed .delta-line.before .delta-val,
+.delta-row.removed .delta-line.before .delta-val{text-decoration:line-through;text-decoration-color:var(--gray-cool-300)}
+.delta-line.after .delta-val{font-weight:500}
+.delta-row.added  .delta-line.after .delta-val{color:var(--success-600)}
+.delta-row.removed .delta-line.after .delta-val{color:var(--gray-cool-500)}
+.delta-val.empty{color:var(--gray-cool-400);font-style:italic;text-decoration:none}
+.delta-row.failed .delta-val.fail{color:var(--warning-700)}
+.delta-row.failed .delta-label{color:var(--warning-500)}
+
 .applied-footer{display:flex;flex-direction:column;gap:8px;margin-top:8px;align-items:flex-start}
 .applied-note{font-size:12px;line-height:1.5;color:var(--gray-cool-500)}
 .applied-note b{color:var(--text-secondary)}
@@ -389,8 +404,7 @@ body{
 
 /* partial success — a change that couldn't be applied */
 .applied-count.partial{background:var(--warning-50);color:var(--warning-700)}
-.applied-row.failed .applied-ico.failed .ico{color:var(--warning-500);width:15px;height:15px}
-.applied-value.fail{color:var(--warning-700);font-weight:600}
+.applied-ico.failed .ico{color:var(--warning-500)}
 .applied-fail-note{display:flex;gap:8px;align-items:flex-start;margin:2px 14px 12px;padding:9px 11px;background:var(--warning-50);border:1px solid #fec84b;border-radius:8px;font-size:12px;line-height:1.45;color:var(--warning-700)}
 .applied-fail-note .ico{width:15px;height:15px;flex:0 0 auto;color:var(--warning-500);margin-top:1px}
 
