@@ -387,6 +387,29 @@ body{
 .undo-done{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--success-600)}
 .undo-done .ico{width:14px;height:14px}
 
+/* partial success — a change that couldn't be applied */
+.applied-count.partial{background:var(--warning-50);color:var(--warning-700)}
+.applied-row.failed .applied-ico.failed .ico{color:var(--warning-500);width:15px;height:15px}
+.applied-value.fail{color:var(--warning-700);font-weight:600}
+.applied-fail-note{display:flex;gap:8px;align-items:flex-start;margin:2px 14px 12px;padding:9px 11px;background:var(--warning-50);border:1px solid #fec84b;border-radius:8px;font-size:12px;line-height:1.45;color:var(--warning-700)}
+.applied-fail-note .ico{width:15px;height:15px;flex:0 0 auto;color:var(--warning-500);margin-top:1px}
+
+/* save-conflict card */
+.conflict-card{margin-top:10px;border:1px solid #fec84b;border-radius:12px;overflow:hidden;background:var(--warning-50)}
+.conflict-head{display:flex;align-items:center;gap:8px;padding:11px 14px;font-size:13px;font-weight:700;color:var(--warning-700)}
+.conflict-head .ico{width:16px;height:16px;color:var(--warning-500)}
+.conflict-opts{display:flex;flex-direction:column;gap:8px;padding:0 14px 12px}
+.conflict-opt{background:var(--white);border:1px solid var(--gray-cool-200);border-radius:8px;padding:9px 12px}
+.conflict-label{font-size:11px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--gray-cool-400);margin-bottom:3px}
+.conflict-text{font-size:13px;line-height:1.45;color:var(--text-primary)}
+.conflict-actions{display:flex;gap:8px;padding:0 14px 14px}
+.conflict-keep{flex:1;border:1px solid var(--border-primary);background:var(--white);color:var(--text-secondary);border-radius:8px;padding:8px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.conflict-keep:hover{background:var(--gray-cool-25)}
+.conflict-use{flex:1;border:none;background:var(--brand-500);color:var(--white);border-radius:8px;padding:8px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.conflict-use:hover{background:var(--brand-400)}
+.conflict-done{display:flex;align-items:center;gap:6px;padding:0 14px 14px;font-size:12px;font-weight:600;color:var(--success-600)}
+.conflict-done .ico{width:15px;height:15px}
+
 /* footer */
 .composer-foot{padding:14px 18px 16px;border-top:1px solid var(--gray-cool-100)}
 .composer-suggests{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}

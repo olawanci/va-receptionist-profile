@@ -200,6 +200,17 @@ let undoSeq = 0;
 
 function renderApplied(changes, undoId) {
   const rows = changes.map(c => {
+    if (c.status === "failed") {
+      // partial success — this row couldn't be applied
+      return `
+      <div class="applied-row failed">
+        <span class="applied-ico failed">${ICONS.alert}</span>
+        <span class="applied-field">${c.field}</span>
+        <span class="applied-arrow">→</span>
+        <span class="applied-value fail">Couldn't apply</span>
+        <span class="applied-was">${c.reason}</span>
+      </div>`;
+    }
     let icon, valueHtml;
     if (c.action === "removed") {
       icon = `<span class="applied-ico removed">${ICONS.trash}</span>`;
@@ -221,14 +232,47 @@ function renderApplied(changes, undoId) {
     </div>`;
   }).join("");
   const n = changes.length;
+  const failed = changes.filter(c => c.status === "failed");
+  const ok = n - failed.length;
+  const countLabel = failed.length
+    ? `${ok} of ${n} applied`
+    : `${n} change${n > 1 ? "s" : ""}`;
+  const failFooter = failed.length
+    ? `<div class="applied-fail-note">${ICONS.alert}<span>${failed.length} change couldn't be applied — ${failed[0].reason}. The rest were applied.</span></div>`
+    : "";
   return `
-    <div class="applied-card">
-      <div class="applied-head"><span>Applied to the agent</span><span class="applied-count">${n} change${n > 1 ? "s" : ""}</span></div>
+    <div class="applied-card${failed.length ? " has-failed" : ""}">
+      <div class="applied-head"><span>Applied to the agent</span><span class="applied-count${failed.length ? " partial" : ""}">${countLabel}</span></div>
       <div class="applied-body">${rows}</div>
+      ${failFooter}
     </div>
     <div class="applied-footer">
       <span class="applied-note">To accept the change click on <b>“Save changes”</b> — nothing reaches callers until you do.</span>
       ${undoId ? `<button class="undo-btn" data-undo="${undoId}">Undo</button>` : ""}
+    </div>`;
+}
+
+/* conflict card — the human edited a field after the AI read it (save conflict) */
+const conflictRegistry = {};
+let conflictSeq = 0;
+function renderConflict(cId, conflict) {
+  return `
+    <div class="conflict-card">
+      <div class="conflict-head">${ICONS.alert}<span>${conflict.field} changed since I read it</span></div>
+      <div class="conflict-opts">
+        <div class="conflict-opt">
+          <div class="conflict-label">Your version</div>
+          <div class="conflict-text">${conflict.mine || "<i>empty</i>"}</div>
+        </div>
+        <div class="conflict-opt">
+          <div class="conflict-label">AI suggestion</div>
+          <div class="conflict-text">${conflict.ai}</div>
+        </div>
+      </div>
+      <div class="conflict-actions">
+        <button class="conflict-keep" data-conflict-keep="${cId}">Keep mine</button>
+        <button class="conflict-use" data-conflict-use="${cId}">Use AI version</button>
+      </div>
     </div>`;
 }
 
@@ -250,6 +294,38 @@ let mode = "new";
 
 const LANG_FLAGS = { "Spanish (Spain)": "🇪🇸", "English (British)": "🇬🇧", "Polish (Poland)": "🇵🇱" };
 
+/* supported languages + a plan cap, used for nothing-to-do and limit states */
+const LANGS = {
+  english:    { label: "English (British)",     flag: "🇬🇧" },
+  spanish:    { label: "Spanish (Spain)",        flag: "🇪🇸" },
+  polish:     { label: "Polish (Poland)",        flag: "🇵🇱" },
+  french:     { label: "French (France)",        flag: "🇫🇷" },
+  german:     { label: "German (Germany)",       flag: "🇩🇪" },
+  italian:    { label: "Italian (Italy)",        flag: "🇮🇹" },
+  portuguese: { label: "Portuguese (Portugal)",  flag: "🇵🇹" },
+};
+const LANG_CAP = 3; // Starter plan allows 3 languages per agent
+function detectLang(t) {
+  for (const k in LANGS) if (t.includes(k)) return k;
+  if (/polski/.test(t)) return "polish";
+  return null;
+}
+function hasChip(containerId, label) {
+  const c = document.getElementById(containerId);
+  return c ? [...c.querySelectorAll(".chip")].some(ch => ch.textContent.includes(label)) : false;
+}
+function langCount() {
+  const c = document.getElementById("field-language");
+  return c ? c.querySelectorAll(".chip").length : 0;
+}
+function currentLangs() {
+  const c = document.getElementById("field-language");
+  return c ? [...c.querySelectorAll(".chip")].map(ch => ch.textContent.replace("✕", "").trim()).join(", ") : "";
+}
+
+/* save-conflict tracking: true once the human types into the greeting field */
+let greetingTouched = false;
+
 /* keyword-driven mock responder → returns { text, apply?, revert?, changes?, sections?, suggests? } */
 function respond(text) {
   const t = text.toLowerCase();
@@ -260,31 +336,28 @@ function respond(text) {
     const greetInp = document.getElementById("input-greeting");
     const greetPrev = greetInp ? greetInp.value : "";
     return {
-      text: `Here's a warmer, more natural setup that still keeps your company name — I've tuned the languages, voice, and greeting in one go:`,
+      text: `I applied most of your setup — the language, greeting, and a matching Polish voice. One thing didn't go through:`,
       apply: () => {
+        // Voice change intentionally NOT applied → partial success
         addChip("field-language", "🇵🇱", "Polish (Poland)");
-        addChip("field-voice", "🇵🇱", "Polish (Poland)");
         if (greetInp) greetInp.value = greetNext;
         removeChip("field-language", "Spanish (Spain)");
-        removeChip("field-voice", "Spanish (Spain)");
         flash(document.getElementById("field-language"));
       },
       revert: () => {
         removeChip("field-language", "Polish (Poland)");
-        removeChip("field-voice", "Polish (Poland)");
         if (greetInp) greetInp.value = greetPrev;
         addChip("field-language", "🇪🇸", "Spanish (Spain)");
-        addChip("field-voice", "🇪🇸", "Spanish (Spain)");
         flash(document.getElementById("field-language"));
       },
       changes: [
         { field: "Language", action: "added",   value: "Polish (Poland)" },
         { field: "Greeting", action: "changed", to: "“Hi, thanks for calling…”" },
-        { field: "Voice",    action: "changed", to: "Amelia, warm female" },
+        { field: "Voice",    status: "failed",  reason: "the Amelia voice isn't on your plan" },
         { field: "Language", action: "removed", value: "Spanish (Spain)" },
       ],
       sections: ["personality"],
-      suggests: ["Add a booking skill", "Add a Knowledge Base file"],
+      suggests: ["See voices on other plans", "Add a booking skill", "Add a Knowledge Base file"],
     };
   }
 
@@ -324,8 +397,17 @@ function respond(text) {
   }
 
   // REMOVE a language (checked before add so "remove Spanish" doesn't fall through)
-  if (/remove|delete|drop/.test(t) && /spanish|english|polish/.test(t)) {
-    const lang = /spanish/.test(t) ? "Spanish (Spain)" : /english/.test(t) ? "English (British)" : "Polish (Poland)";
+  if (/remove|delete|drop/.test(t) && detectLang(t)) {
+    const key = detectLang(t);
+    const lang = LANGS[key].label;
+    // NOTHING-TO-DO — the language isn't set, so don't fake a change
+    if (!hasChip("field-language", lang)) {
+      return {
+        notice: { type: "info", text: `<b>${lang}</b> isn't one of Tessa's languages, so there's nothing to remove. She currently speaks <b>${currentLangs()}</b>.` },
+        text: `Want to change something else?`,
+        suggests: ["Add Polish as a language", "Improve the greeting", "Run a configuration audit"],
+      };
+    }
     return {
       text: `Done — I've removed <b>${lang}</b> from Tessa's languages and voices. Callers can no longer be answered in it:`,
       apply: () => {
@@ -334,8 +416,8 @@ function respond(text) {
         flash(document.getElementById("field-language"));
       },
       revert: () => {
-        addChip("field-language", LANG_FLAGS[lang], lang);
-        addChip("field-voice", LANG_FLAGS[lang], lang);
+        addChip("field-language", LANGS[key].flag, lang);
+        addChip("field-voice", LANGS[key].flag, lang);
         flash(document.getElementById("field-language"));
       },
       changes: [
@@ -387,25 +469,50 @@ function respond(text) {
   }
 
   // ADD a language → change lands on the Language + Voice components
-  if (/(polish|polski)/.test(t) || (/language|lang/.test(t) && /add|change|set|switch/.test(t))) {
+  if (/(polish|polski)/.test(t) || (/language|lang|speak/.test(t) && /add|change|set|switch|also/.test(t)) || (/add/.test(t) && detectLang(t))) {
+    const key = detectLang(t) || "polish";
+    const { label, flag } = LANGS[key];
+    // NOTHING-TO-DO — already set
+    if (hasChip("field-language", label)) {
+      return {
+        notice: { type: "info", text: `Tessa already speaks <b>${label}</b> — nothing to add. Her languages are <b>${currentLangs()}</b>.` },
+        text: `Anything else?`,
+        suggests: ["Remove Spanish", "Improve the greeting", "Run a configuration audit"],
+      };
+    }
+    // PLAN LIMIT — at the cap
+    if (langCount() >= LANG_CAP) {
+      return {
+        notice: {
+          type: "info",
+          text: `Your <b>Starter</b> plan supports up to <b>${LANG_CAP} languages</b> per agent, and Tessa is already at ${LANG_CAP} (${currentLangs()}). Upgrade to add ${label}, or remove one first.`,
+          action: "See plans",
+        },
+        text: `Want me to swap one out instead?`,
+        suggests: ["Remove Spanish", "Run a configuration audit"],
+      };
+    }
+    const atCapAfter = langCount() + 1 >= LANG_CAP;
     return {
-      text: `Done — I've added <b>Polish (Poland)</b> to Tessa's languages and gave her a matching Polish voice. You can see it in the form:`,
+      text: `Done — I've added <b>${label}</b> to Tessa's languages and gave her a matching voice.${atCapAfter ? ` That's the max <b>${LANG_CAP}</b> on your plan.` : ""}`,
       apply: () => {
-        addChip("field-language", "🇵🇱", "Polish (Poland)");
-        addChip("field-voice", "🇵🇱", "Polish (Poland)");
+        addChip("field-language", flag, label);
+        addChip("field-voice", flag, label);
         flash(document.getElementById("field-language"));
       },
       revert: () => {
-        removeChip("field-language", "Polish (Poland)");
-        removeChip("field-voice", "Polish (Poland)");
+        removeChip("field-language", label);
+        removeChip("field-voice", label);
         flash(document.getElementById("field-language"));
       },
       changes: [
-        { field: "Language", action: "added", value: "Polish (Poland)" },
-        { field: "Voice",    action: "added", value: "Polish (Poland)" },
+        { field: "Language", action: "added", value: label },
+        { field: "Voice",    action: "added", value: label },
       ],
       sections: ["personality"],
-      suggests: ["Remove Spanish", "Improve the greeting", "Run a configuration audit"],
+      suggests: atCapAfter
+        ? ["Add French", "Improve the greeting", "Run a configuration audit"]
+        : ["Remove Spanish", "Improve the greeting", "Run a configuration audit"],
     };
   }
 
@@ -414,6 +521,14 @@ function respond(text) {
     const next = "Hi, thanks for calling [Company Name]! I'm Tessa — how can I help you today?";
     const inp = document.getElementById("input-greeting");
     const prev = inp ? inp.value : "";
+    // SAVE CONFLICT — the human edited this field after the AI last read it
+    if (greetingTouched) {
+      return {
+        text: `Heads up — you've edited the greeting since I last looked, so I won't overwrite it silently. Which version should Tessa use?`,
+        conflict: { field: "Greeting", mine: prev, ai: next, apply: () => { if (inp) inp.value = next; flash(inp && inp.closest(".input")); } },
+        suggests: ["Add Polish as a language", "Add a booking skill"],
+      };
+    }
     return {
       text: `Done — here's a warmer, more natural greeting that still keeps your company name:`,
       apply: () => {
@@ -522,9 +637,10 @@ function appendMessage(role, html, opts) {
   const attachHtml = opts.attachment
     ? `<div class="msg-attachment">${opts.attachment.files.map(f => fileItemHTML(f, "processing")).join("")}</div>`
     : "";
+  const conflictHtml = opts.conflictId ? renderConflict(opts.conflictId, opts.conflict) : "";
   const appliedHtml = opts.changes && opts.changes.length ? renderApplied(opts.changes, opts.undoId) : "";
   const bubble = html ? `<div class="bubble">${html}</div>` : "";
-  el.innerHTML = `${avatar}<div class="msg-col">${noticeHtml}${bubble}${attachHtml}${appliedHtml}</div>`;
+  el.innerHTML = `${avatar}<div class="msg-col">${noticeHtml}${bubble}${attachHtml}${conflictHtml}${appliedHtml}</div>`;
   msgs.appendChild(el);
   scrollMsgs();
   return el;
@@ -550,8 +666,11 @@ function botReply(userText) {
     if (r.apply) r.apply();                    // change lands in the form right away
     let undoId = null;
     if (r.revert) { undoId = "u" + (++undoSeq); undoRegistry[undoId] = r.revert; }
+    let conflictId = null;
+    if (r.conflict) { conflictId = "c" + (++conflictSeq); conflictRegistry[conflictId] = r.conflict; }
     const msgEl = appendMessage("assistant", r.text, {
       changes: r.changes, undoId, attachment: r.attachment, notice: r.notice,
+      conflict: r.conflict, conflictId,
     });
     if (r.attachment) {
       // mirror the file into Knowledge sources, then flip both cards to Complete
@@ -588,8 +707,34 @@ msgs.addEventListener("click", (e) => {
       });
       renderSuggests(["Add Transfer to Human", "Run a configuration audit"]);
     }, 900);
+    return;
+  }
+  // Save conflict — resolve by keeping the human's version or using the AI's
+  const useAi = e.target.closest("[data-conflict-use]");
+  const keepMine = e.target.closest("[data-conflict-keep]");
+  if (useAi || keepMine) {
+    const btn = useAi || keepMine;
+    const id = btn.dataset.conflictUse || btn.dataset.conflictKeep;
+    const card = btn.closest(".conflict-card");
+    if (useAi && conflictRegistry[id]) {
+      conflictRegistry[id].apply();
+      greetingTouched = false;             // AI value is now the baseline
+      markUnsaved(["personality"]);
+      card.querySelector(".conflict-actions").outerHTML =
+        `<div class="conflict-done">${ICONS.check}Using the AI version</div>`;
+      showToast("Greeting updated to the AI version");
+    } else {
+      greetingTouched = false;             // user keeps theirs; treat as reconciled
+      card.querySelector(".conflict-actions").outerHTML =
+        `<div class="conflict-done">${ICONS.check}Kept your version</div>`;
+    }
+    delete conflictRegistry[id];
   }
 });
+
+// mark the greeting as human-touched once the user types into it (save-conflict trigger)
+const greetingInput = document.getElementById("input-greeting");
+if (greetingInput) greetingInput.addEventListener("input", () => { greetingTouched = true; });
 
 function send(text) {
   const val = (text != null ? text : input.value).trim();
