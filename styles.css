@@ -319,18 +319,46 @@ body{
 .composer-body::-webkit-scrollbar-thumb{background:var(--gray-cool-200);border-radius:8px}
 
 /* messages */
-.msg{display:flex;gap:10px;margin-bottom:16px;animation:msgIn .25s ease}
+.msg{display:flex;gap:10px;margin-bottom:18px;animation:msgIn .25s ease}
 @keyframes msgIn{from{transform:translateY(6px);opacity:0}to{transform:translateY(0);opacity:1}}
-.msg-avatar{width:30px;height:30px;border-radius:999px;flex:0 0 auto;background:linear-gradient(135deg,#5b7cff,#b06bff);display:flex;align-items:center;justify-content:center;color:var(--white)}
-.msg-avatar .ico{width:17px;height:17px;stroke:var(--white)}
-.bubble{background:var(--gray-cool-50);border:1px solid var(--gray-cool-100);border-radius:12px;padding:11px 14px;font-size:14px;line-height:1.5;color:var(--text-secondary);max-width:100%}
-.msg.user{flex-direction:row-reverse}
-.msg.user .bubble{background:var(--white);color:var(--text-primary);border:1px solid var(--gray-cool-200);box-shadow:var(--shadow-xs)}
-.msg-user-avatar{width:30px;height:30px;border-radius:999px;flex:0 0 auto;object-fit:cover;border:2px solid var(--white);box-shadow:var(--shadow-xs)}
 .msg-col{min-width:0;display:flex;flex-direction:column;gap:0}
 
+/* assistant: plain text, no avatar, no bubble — reads flush against the panel */
+.msg.assistant .bubble{background:none;border:none;padding:0;font-size:14px;line-height:1.55;color:var(--text-primary);max-width:100%}
+.msg.assistant .bubble b{font-weight:500;color:var(--text-primary)}
+
+/* user: subtle bubble on the right + avatar */
+.msg.user{flex-direction:row-reverse;align-items:flex-start}
+.msg.user .msg-col{align-items:flex-end}
+.msg.user .bubble{background:var(--brand-25);color:var(--text-primary);border:1px solid var(--gray-cool-100);border-radius:12px;padding:9px 14px;font-size:14px;line-height:1.5}
+.msg-user-avatar{width:30px;height:30px;border-radius:999px;flex:0 0 auto;object-fit:cover;border:2px solid var(--white);box-shadow:var(--shadow-xs)}
+
 /* thinking state */
-.thinking{font-size:14px;font-style:italic;color:var(--gray-cool-500);padding:6px 2px}
+.thinking{font-size:14px;font-style:italic;color:var(--gray-cool-500);padding:2px 0}
+
+/* composer file attachment (reuses .file-item) */
+.msg-attachment{margin-top:10px}
+.msg-attachment .file-item{padding:12px}
+.msg-attachment .file-item + .file-item{margin-top:8px}
+.file-status.processing{color:var(--gray-cool-500)}
+.file-status.processing .ico{color:var(--gray-cool-400)}
+.file-status .spin{display:inline-flex;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* system notification (inline banner in the conversation) */
+.sys-notice{display:flex;gap:10px;margin-top:10px;padding:11px 13px;border-radius:10px;font-size:13px;line-height:1.5;border:1px solid transparent}
+.sys-notice .ico{width:17px;height:17px;flex:0 0 auto;margin-top:1px}
+.sys-notice .notice-body{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.sys-notice b{font-weight:500}
+.sys-notice.error{background:var(--error-100);border-color:#fda29b;color:#912018}
+.sys-notice.error .ico{color:var(--error-600)}
+.sys-notice.warning{background:var(--warning-50);border-color:#fec84b;color:var(--warning-700)}
+.sys-notice.warning .ico{color:var(--warning-500)}
+.sys-notice.info{background:var(--brand-25);border-color:var(--brand-100);color:var(--text-secondary)}
+.sys-notice.info .ico{color:var(--brand-500)}
+.notice-action{border:1px solid currentColor;background:var(--white);color:inherit;border-radius:8px;padding:5px 14px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.notice-action:hover{background:var(--gray-cool-25)}
+.notice-action:disabled{opacity:.6;cursor:default}
 .thinking .td{animation:tdBlink 1.2s infinite;font-style:normal}
 .thinking .td:nth-child(2){animation-delay:.2s}
 .thinking .td:nth-child(3){animation-delay:.4s}
